@@ -1,0 +1,7 @@
+{
+    "package_name": "meu-pacote-visualizacao",
+    "repository_source": "file:/caminho/para/repositorio/test_repo",
+    "repo_mode": "local",
+    "package_version": "1.0.0",
+    "output_mode_ascii_tree": true
+}
