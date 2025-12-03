@@ -1,0 +1,7 @@
+# Formato: PACOTE_A depende de PACOTE_B
+A: B, C
+B: D
+C: D, E
+D:
+E: F
+F: C # Cria uma dependência cíclica (E -> F -> C -> D)
