@@ -2,97 +2,137 @@ import argparse
 import json
 import sys
 import os
+import requests
+from lxml import etree # Using lxml for robust XML/POM parsing
 
-# ----------------------------------------------------
-# Funções Principais
-# ----------------------------------------------------
+# --- Helper Functions from Stage 1 (Simplified for brevity) ---
 
 def load_config(config_path):
-    """Carrega o arquivo JSON e retorna o dicionário de configurações."""
+    # ... (Same as Stage 1 load_config function) ...
     if not os.path.exists(config_path):
-        # Requisito 4: Tratamento de erro de arquivo não encontrado
-        raise FileNotFoundError(f"Erro: O arquivo de configuração JSON não foi encontrado em '{config_path}'.")
-
-    try:
-        with open(config_path, 'r') as f:
-            # Requisito 1: Fonte de parâmetros é um arquivo JSON
-            config = json.load(f)
-        return config
-    except json.JSONDecodeError as e:
-        # Requisito 4: Tratamento de erro de sintaxe JSON
-        raise ValueError(f"Erro: Falha ao analisar o arquivo JSON. Verifique a sintaxe.\nDetalhes: {e}")
+        raise FileNotFoundError(f"Error: The configuration file was not found at '{config_path}'.")
+    with open(config_path, 'r') as f:
+        return json.load(f)
 
 def validate_config(config):
-    """Valida se todos os parâmetros requeridos estão presentes e nos formatos esperados."""
-    
-    required_params = [
-        'package_name',
-        'repository_source',
-        'repo_mode',
-        'package_version',
-        'output_mode_ascii_tree'
-    ]
-    
-    # Requisito 4: Demonstração de tratamento de erros para todos os parâmetros
-    
-    # 1. Verificar a presença dos parâmetros
+    # ... (Simplified validation for demonstration) ...
+    required_params = ['package_name', 'group_id', 'repository_source', 'package_version', 'repo_mode']
     for param in required_params:
         if param not in config:
-            raise ValueError(f"Erro de Configuração: O parâmetro obrigatório '{param}' está faltando no arquivo JSON.")
-
-    # 2. Verificar os tipos/valores dos parâmetros
+            raise ValueError(f"Configuration Error: The required parameter '{param}' is missing.")
+    if config.get('repo_mode') != 'remote':
+        # Stage 2 requires network access
+        raise ValueError("Configuration Error: 'repo_mode' must be 'remote' for Stage 2 data collection.")
     
-    for param in ['package_name', 'repository_source', 'package_version']:
-        if not isinstance(config[param], str) or not config[param].strip():
-            raise TypeError(f"Erro de Configuração: '{param}' deve ser uma string não vazia.")
-
-    # Validação de valor (repo_mode)
-    valid_repo_modes = ['local', 'remote']
-    if config['repo_mode'] not in valid_repo_modes:
-        raise ValueError(f"Erro de Configuração: 'repo_mode' deve ser uma das seguintes opções: {valid_repo_modes}. Valor fornecido: {config['repo_mode']}")
-
-    # Validação de tipo (output_mode_ascii_tree)
-    if not isinstance(config['output_mode_ascii_tree'], bool):
-        raise TypeError(f"Erro de Configuração: 'output_mode_ascii_tree' deve ser um booleano (true/false). Valor fornecido: {config['output_mode_ascii_tree']}")
-
     return config
 
+# ----------------------------------------------------
+# Stage 2: Data Collection Logic
+# ----------------------------------------------------
+
+def build_pom_url(config):
+    """
+    Constructs the direct URL to the Maven POM file.
+    Requirement 3: Uses the repository URL.
+    """
+    group_path = config['group_id'].replace('.', '/')
+    artifact_id = config['package_name']
+    version = config['package_version']
+    base_url = config['repository_source'].rstrip('/')
+    
+    # Standard Maven repository path structure
+    pom_url = f"{base_url}/{group_path}/{artifact_id}/{version}/{artifact_id}-{version}.pom"
+    
+    return pom_url
+
+def fetch_and_parse_dependencies(pom_url):
+    """
+    Fetches the POM file and extracts direct dependencies.
+    Requirements 1 & 3: Java (Maven) package dependency extraction.
+    """
+    print(f"Fetching POM file from: {pom_url}")
+    
+    try:
+        response = requests.get(pom_url, timeout=10)
+        response.raise_for_status() # Raise an exception for bad status codes (4xx or 5xx)
+    except requests.exceptions.RequestException as e:
+        raise ConnectionError(f"Error fetching POM file: {e}")
+
+    try:
+        # Parse XML content
+        # Use lxml for robustness, but native etree works too
+        root = etree.fromstring(response.content)
+        
+        # Define the XML namespace used in Maven POM files
+        # The 'd' prefix is arbitrary for use in XPath
+        namespaces = {'d': 'http://maven.apache.org/POM/4.0.0'}
+        
+        # XPath to find all direct <dependency> tags under <dependencies>
+        dependencies_xpath = "//d:dependencies/d:dependency"
+        
+        dependencies = []
+        for dep_element in root.xpath(dependencies_xpath, namespaces=namespaces):
+            # Extract groupId, artifactId, and version for each direct dependency
+            group_id = dep_element.xpath("./d:groupId/text()", namespaces=namespaces)
+            artifact_id = dep_element.xpath("./d:artifactId/text()", namespaces=namespaces)
+            version = dep_element.xpath("./d:version/text()", namespaces=namespaces)
+            
+            # Simple check to ensure we got all parts
+            if group_id and artifact_id:
+                dependencies.append({
+                    'groupId': group_id[0],
+                    'artifactId': artifact_id[0],
+                    # Use version if available, otherwise mark as unknown or provided by parent POM
+                    'version': version[0] if version else 'N/A (Managed)'
+                })
+        
+        return dependencies
+
+    except etree.XMLSyntaxError as e:
+        raise ValueError(f"Error parsing POM XML: {e}")
+    except Exception as e:
+        raise Exception(f"An unexpected error occurred during parsing: {e}")
+
+
 def main():
-    """Função principal que configura o CLI, carrega e exibe os parâmetros."""
-    
+    """Main function to execute Stage 2 logic."""
     parser = argparse.ArgumentParser(
-        description="CLI para visualização de grafos de dependência. Etapa 1: Carregar e exibir configurações JSON."
+        description="CLI tool for dependency graph visualization. Stage 2: Data Collection."
     )
-    
     parser.add_argument(
         '--config',
         type=str,
         required=True,
-        help="Caminho para o arquivo de configuração JSON."
+        help="Path to the JSON configuration file."
     )
 
     args = parser.parse_args()
     
-    print("--- Iniciando Etapa 1: Protocolo de Configuração JSON ---")
+    print("\n--- Starting Stage 2: Data Collection Protocol (Maven) ---")
 
     try:
-        # 1. Carregar configuração
+        # 1. Load and Validate configuration
         config_data = load_config(args.config)
-        
-        # 2. Validar configuração
         validated_config = validate_config(config_data)
 
-        # Requisito 3: Exibir todos os parâmetros (chave-valor)
-        print("\n✅ Configurações Carregadas e Validadas:")
-        for key, value in validated_config.items():
-            # Exibe chave: valor (tipo)
-            print(f"- **{key}**: {value} (Tipo: {type(value).__name__})")
-        
-        print("\n--- Etapa 1 Concluída com Sucesso. ---")
+        # 2. Build URL and Fetch Data
+        pom_url = build_pom_url(validated_config)
+        direct_dependencies = fetch_and_parse_dependencies(pom_url)
 
-    except Exception as e:
-        # Requisito 4: Demonstração de tratamento de erros
-        print(f"\n❌ ERRO FATAL na Configuração:")
+        # Requirement 4: Display all direct dependencies
+        print("\n Direct Dependencies of "
+              f"{validated_config['group_id']}:{validated_config['package_name']}@v{validated_config['package_version']}:")
+        
+        if not direct_dependencies:
+            print("- No direct dependencies found in the POM file.")
+        else:
+            for dep in direct_dependencies:
+                print(f"- **{dep['groupId']}:{dep['artifactId']}** (Version: {dep['version']})")
+        
+        print("\n--- Stage 2 Completed Successfully. ---")
+
+    except (FileNotFoundError, ValueError, ConnectionError, Exception) as e:
+        print(f"\n FATAL ERROR during Stage 2:")
         print(f"{e}", file=sys.stderr)
         sys.exit(1)
 

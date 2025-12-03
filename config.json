@@ -1,7 +1,8 @@
 {
-    "package_name": "meu-pacote-visualizacao",
-    "repository_source": "file:/caminho/para/repositorio/test_repo",
-    "repo_mode": "local",
-    "package_version": "1.0.0",
-    "output_mode_ascii_tree": true
+    "package_name": "junit-jupiter-api",
+    "group_id": "org.junit.jupiter",
+    "repository_source": "https://repo1.maven.org/maven2/",
+    "repo_mode": "remote",
+    "package_version": "5.10.1",
+    "output_mode_ascii_tree": false
 }
